@@ -316,6 +316,7 @@ export default function AiVisionWorkspace({
   onOpenProject,
 }: AiVisionWorkspaceProps) {
   const initialSnapshot = useMemo(() => createWorkspaceSnapshotFromProject(project), [project]);
+  const [workspaceProjectId, setWorkspaceProjectId] = useState(project.id);
 
   const [boardName, setBoardName] = useState(initialSnapshot.boardName);
   const [items, setItems] = useState<CanvasItem[]>(initialSnapshot.items);
@@ -423,6 +424,40 @@ export default function AiVisionWorkspace({
       }
     };
   }, []);
+
+  useEffect(() => {
+    setWorkspaceProjectId(project.id);
+    setBoardName(initialSnapshot.boardName);
+    hasManualBoardNameEditRef.current = false;
+    setItems(initialSnapshot.items);
+    setSessions(initialSnapshot.sessions);
+    setCurrentSessionId(initialSnapshot.currentSessionId);
+    setView(initialSnapshot.view);
+    setSceneBySessionId(initialSnapshot.sceneBySessionId);
+    setSelectedImageModel(initialSnapshot.selectedImageModel);
+    setActiveSizeId(initialSnapshot.activeSizeId || null);
+    setActiveBrandSpecId(initialSnapshot.activeBrandSpecId || null);
+    setActiveBrandTemplateId(initialSnapshot.activeBrandTemplateId || null);
+    setTool('select');
+    setChatInput('');
+    setChatInputImages([]);
+    setIsChatLoading(false);
+    setActionPopover(null);
+    setCropState(null);
+    setDrawPreviewPoints(null);
+    setLinePreviewItem(null);
+    setEditingTextItemId(null);
+    setEditingTextValue('');
+    setReplaceTargetItemId(null);
+    setStatusNotice(null);
+    setStorageWarning(null);
+    setIsHistoryMenuOpen(false);
+    setIsBrandSpecMenuOpen(false);
+    setIsBrandMenuOpen(false);
+    setIsSizeConfigMenuOpen(false);
+    clearTouchGestureState();
+    interactionRef.current = null;
+  }, [initialSnapshot, project.id]);
 
   useEffect(() => {
     document.documentElement.classList.add('ai-vision-workspace-active');
@@ -904,6 +939,10 @@ export default function AiVisionWorkspace({
   }, [canvasHover, canvasWheelLock, cropState]);
 
   useEffect(() => {
+    if (workspaceProjectId !== project.id) {
+      return;
+    }
+
     let cancelled = false;
 
     void saveProject(
@@ -934,7 +973,17 @@ export default function AiVisionWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [boardName, currentSessionId, items, project, sceneBySessionId, selectedImageModel, sessions, view]);
+  }, [
+    boardName,
+    currentSessionId,
+    items,
+    project,
+    sceneBySessionId,
+    selectedImageModel,
+    sessions,
+    view,
+    workspaceProjectId,
+  ]);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -1482,6 +1531,25 @@ export default function AiVisionWorkspace({
     return loadingItems.map((item) => item.id);
   }
 
+  function buildPromptWithCanvasText(prompt: string) {
+    const normalizedPrompt = prompt.trim();
+    if (!normalizedPrompt) return normalizedPrompt;
+
+    const canvasTexts = Array.from(
+      new Set(
+        itemsRef.current
+          .filter((item): item is CanvasItem & { type: 'text' } => item.type === 'text')
+          .map((item) => item.content.trim())
+          .filter(Boolean)
+      )
+    ).slice(0, 8);
+
+    if (!canvasTexts.length) return normalizedPrompt;
+
+    const textConstraint = canvasTexts.map((text, index) => `${index + 1}. ${text}`).join('\n');
+    return `${normalizedPrompt}\n\n【画板文案（请在画面中保留，不要省略或替换）】\n${textConstraint}`;
+  }
+
   function finishTextEditing() {
     if (!editingTextItemId) return;
     const item = itemsRef.current.find((current) => current.id === editingTextItemId && current.type === 'text');
@@ -1844,9 +1912,10 @@ export default function AiVisionWorkspace({
     setActionPopover((previous) => (previous ? { ...previous, isSubmitting: true } : previous));
 
     try {
+      const promptWithCanvasText = buildPromptWithCanvasText(prompt);
       const referenceImage = await exportImageSource(targetItem);
       const result = await generateImageAI(
-        prompt,
+        promptWithCanvasText,
         selectedImageModel,
         [referenceImage, ...hiddenTemplateReferences],
         {
@@ -1969,6 +2038,7 @@ export default function AiVisionWorkspace({
           ]);
 
           try {
+            const promptWithCanvasText = buildPromptWithCanvasText(prompt);
             const effectiveSizeHint = activeSizeId || call.args.sizeHint;
             const referenceImages = call.args.referenceImages || attachedImages;
             let inferredSizeHint = effectiveSizeHint;
@@ -1993,7 +2063,7 @@ export default function AiVisionWorkspace({
             }
             
             const imageResult = await generateImageAI(
-              prompt,
+              promptWithCanvasText,
               selectedImageModel,
               [...referenceImages, ...hiddenTemplateReferences],
               {
